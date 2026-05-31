@@ -338,11 +338,18 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 			await userInstructionService.start().catch(() => {});
 		}
 
+		const configuredExtensions = extensions ?? config.extensions ?? [];
+		const hasSkillContributingExtension = configuredExtensions.some(
+			(extension) =>
+				extension.disabled !== true &&
+				extension.manifest.capabilities.includes("skills"),
+		);
 		const registerSkillsTool =
 			normalized.enableTools &&
 			skillsEnabled &&
 			Boolean(userInstructionService) &&
-			userInstructionService?.hasConfiguredSkills(config.skills) === true &&
+			(userInstructionService?.hasConfiguredSkills(config.skills) === true ||
+				hasSkillContributingExtension) &&
 			isSkillsToolEnabledForSession({
 				cwd: config.cwd,
 				providerId: config.providerId,
@@ -364,7 +371,7 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 					})
 				: undefined;
 		const runtimeExtensions = userInstructionPlugin
-			? [...(extensions ?? config.extensions ?? []), userInstructionPlugin]
+			? [...configuredExtensions, userInstructionPlugin]
 			: (extensions ?? config.extensions);
 
 		if (normalized.enableTools) {

@@ -5,6 +5,7 @@ import type {
 	AgentConfig,
 	AgentExtensionMessageBuilder,
 	AgentExtensionRule,
+	AgentExtensionSkill,
 	AgentTool,
 	AgentToolContext,
 	Message,
@@ -23,6 +24,7 @@ import { loadSandboxedPlugins } from "./plugin-sandbox";
 function createApiCapture() {
 	const tools: AgentTool[] = [];
 	const rules: AgentExtensionRule[] = [];
+	const skills: AgentExtensionSkill[] = [];
 	const messageBuilders: AgentExtensionMessageBuilder<Message[]>[] = [];
 	const automationEventTypes: unknown[] = [];
 	const api = {
@@ -32,11 +34,12 @@ function createApiCapture() {
 			builder: AgentExtensionMessageBuilder<Message[]>,
 		) => messageBuilders.push(builder),
 		registerRule: (rule: AgentExtensionRule) => rules.push(rule),
+		registerSkill: (skill: AgentExtensionSkill) => skills.push(skill),
 		registerProvider: () => {},
 		registerAutomationEventType: (eventType: unknown) =>
 			automationEventTypes.push(eventType),
 	};
-	return { tools, rules, messageBuilders, automationEventTypes, api };
+	return { tools, rules, skills, messageBuilders, automationEventTypes, api };
 }
 
 function makeSnapshot() {
@@ -166,6 +169,25 @@ describe("plugin-sandbox", () => {
 				"        resolveCount += 1;",
 				"        return 'Lazy sandbox rule ' + resolveCount;",
 				"      },",
+				"    });",
+				"  },",
+				"};",
+			].join("\n"),
+			"utf8",
+		);
+
+		await writeFile(
+			join(dir, "plugin-skills.mjs"),
+			[
+				"export default {",
+				"  name: 'sandbox-skills',",
+				"  manifest: { capabilities: ['skills'] },",
+				"  setup(api) {",
+				"    api.registerSkill({",
+				"      name: 'sandbox_skill',",
+				"      description: 'Sandbox skill',",
+				"      instructions: 'Use the sandbox skill.',",
+				"      frontmatter: { bundled: true },",
 				"    });",
 				"  },",
 				"};",
@@ -360,6 +382,7 @@ describe("plugin-sandbox", () => {
 				join(dir, "plugin-automation-events.mjs"),
 				join(dir, "plugin-message-builder.mjs"),
 				join(dir, "plugin-rules.mjs"),
+				join(dir, "plugin-skills.mjs"),
 				join(dir, "plugin-ts.ts"),
 				join(dir, "plugin-dep.ts"),
 				join(dir, "plugin-sdk.ts"),
@@ -651,6 +674,22 @@ describe("plugin-sandbox", () => {
 		}
 		const content = await rules[1].content();
 		expect(content).toBe("Lazy sandbox rule 1");
+	});
+
+	it("registers skills from sandbox plugins", async () => {
+		const extension = sharedExtensions.get("sandbox-skills");
+		const { skills, api } = createApiCapture();
+		await extension?.setup?.(api, {});
+
+		expect(skills).toEqual([
+			expect.objectContaining({
+				name: "sandbox_skill",
+				description: "Sandbox skill",
+				instructions: "Use the sandbox skill.",
+				frontmatter: { bundled: true },
+				source: "sandbox-skills",
+			}),
+		]);
 	});
 
 	it("loads TypeScript plugins in the sandbox process", async () => {

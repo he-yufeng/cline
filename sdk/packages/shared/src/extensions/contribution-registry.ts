@@ -17,6 +17,15 @@ export interface AgentExtensionRule {
 	source?: string;
 }
 
+export interface AgentExtensionSkill {
+	name: string;
+	description?: string;
+	disabled?: boolean;
+	instructions: string;
+	frontmatter?: Record<string, unknown>;
+	source?: string;
+}
+
 export interface AgentExtensionMessageBuilder<TMessage = unknown> {
 	name: string;
 	build: (message: TMessage) => TMessage | Promise<TMessage>;
@@ -56,8 +65,8 @@ export interface AgentExtensionSessionContext {
 /**
  * API surface passed to an extension's `setup()` method.
  *
- * Use it to register the contributions the extension wants to make — tools,
- * commands, message builders, providers, and automation event types. All
+ * Use it to register the contributions the extension wants to make: tools,
+ * commands, skills, message builders, providers, and automation event types. All
  * registrations accumulate into the `ContributionRegistry` and are available to
  * the host after `setup()` completes.
  */
@@ -68,6 +77,8 @@ export interface AgentExtensionApi<TTool = AgentTool, TMessage = unknown> {
 	registerCommand: (command: AgentExtensionCommand) => void;
 	/** Register prompt rules included in the runtime system prompt. Requires the `rules` capability. */
 	registerRule: (rule: AgentExtensionRule) => void;
+	// Register a reusable skill surfaced through the skills tool and slash commands. Requires the `skills` capability.
+	registerSkill: (skill: AgentExtensionSkill) => void;
 	/** Register a named message builder for transforming messages before they are sent. Requires the `messageBuilders` capability. */
 	registerMessageBuilder: (
 		builder: AgentExtensionMessageBuilder<TMessage>,
@@ -135,6 +146,7 @@ const ExtensionCapabilityOptions = [
 	"tools",
 	"commands",
 	"rules",
+	"skills",
 	"messageBuilders",
 	"providers",
 	"automationEvents",
@@ -154,6 +166,7 @@ export interface AgentExtensionRegistry<TTool = AgentTool, TMessage = unknown> {
 	tools: TTool[];
 	commands: AgentExtensionCommand[];
 	rules: AgentExtensionRule[];
+	skills: AgentExtensionSkill[];
 	messageBuilder: AgentExtensionMessageBuilder<TMessage>[];
 	providers: AgentExtensionProvider[];
 	automationEventTypes: AgentExtensionAutomationEventType[];
@@ -222,6 +235,10 @@ interface NormalizedExtension<
 		capabilities: Set<AgentExtensionCapability>;
 		raw: PluginManifest;
 	};
+}
+
+interface AgentExtensionRegistryIntrospectionApi {
+	getRegisteredSkills: () => AgentExtensionSkill[];
 }
 
 const ALLOWED_CAPABILITIES = new Set<AgentExtensionCapability>(
@@ -359,6 +376,54 @@ function normalizeAutomationEventType(
 	};
 }
 
+function normalizeRecord(value: unknown): Record<string, unknown> | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return undefined;
+	}
+	return { ...(value as Record<string, unknown>) };
+}
+
+function normalizeSkillContribution(
+	input: AgentExtensionSkill,
+	extensionName: string,
+): AgentExtensionSkill {
+	if (!input || typeof input !== "object") {
+		throw new Error(
+			`Invalid skill contribution for extension "${extensionName}": expected object`,
+		);
+	}
+	const name = typeof input.name === "string" ? input.name.trim() : "";
+	if (!name) {
+		throw new Error(
+			`Invalid skill contribution for extension "${extensionName}": name is required`,
+		);
+	}
+	const instructions =
+		typeof input.instructions === "string" ? input.instructions : "";
+	if (!instructions.trim()) {
+		throw new Error(
+			`Invalid skill contribution for extension "${extensionName}": instructions are required`,
+		);
+	}
+	const description =
+		typeof input.description === "string" && input.description.trim()
+			? input.description.trim()
+			: undefined;
+	const source =
+		typeof input.source === "string" && input.source.trim()
+			? input.source.trim()
+			: extensionName;
+	const frontmatter = normalizeRecord(input.frontmatter);
+	return {
+		name,
+		...(description ? { description } : {}),
+		...(input.disabled === true ? { disabled: true } : {}),
+		instructions,
+		...(frontmatter ? { frontmatter } : {}),
+		source,
+	};
+}
+
 export class ContributionRegistry<
 	TExtension extends ContributionRegistryExtension<TTool, TMessage>,
 	TTool = AgentTool,
@@ -369,6 +434,7 @@ export class ContributionRegistry<
 		tools: [],
 		commands: [],
 		rules: [],
+		skills: [],
 		messageBuilder: [],
 		providers: [],
 		automationEventTypes: [],
@@ -420,7 +486,8 @@ export class ContributionRegistry<
 			const { extension } = entry;
 			if (extension.disabled) continue;
 			const extensionName = asExtensionName(extension, entry.order);
-			const api: AgentExtensionApi<TTool, TMessage> = {
+			const api: AgentExtensionApi<TTool, TMessage> &
+				AgentExtensionRegistryIntrospectionApi = {
 				registerTool: (tool) => this.registry.tools.push(tool),
 				registerCommand: (command) => this.registry.commands.push(command),
 				registerRule: (rule) => {
@@ -430,6 +497,16 @@ export class ContributionRegistry<
 						);
 					}
 					this.registry.rules.push(rule);
+				},
+				registerSkill: (skill) => {
+					if (!entry.manifest.capabilities.has("skills")) {
+						throw new Error(
+							`Invalid setup for extension "${extensionName}": registerSkill requires the "skills" capability`,
+						);
+					}
+					this.registry.skills.push(
+						normalizeSkillContribution(skill, extensionName),
+					);
 				},
 				registerMessageBuilder: (builder) =>
 					this.registry.messageBuilder.push(builder),
@@ -444,6 +521,7 @@ export class ContributionRegistry<
 						normalizeAutomationEventType(eventType, extensionName),
 					);
 				},
+				getRegisteredSkills: () => [...this.registry.skills],
 			};
 			const setupContext = entry.manifest.capabilities.has("automationEvents")
 				? this.setupContext
@@ -484,6 +562,7 @@ export class ContributionRegistry<
 			tools: [...this.registry.tools],
 			commands: [...this.registry.commands],
 			rules: [...this.registry.rules],
+			skills: [...this.registry.skills],
 			messageBuilder: [...this.registry.messageBuilder],
 			providers: [...this.registry.providers],
 			automationEventTypes: [...this.registry.automationEventTypes],
@@ -496,6 +575,10 @@ export class ContributionRegistry<
 
 	getRegisteredRules(): AgentExtensionRule[] {
 		return [...this.registry.rules];
+	}
+
+	getRegisteredSkills(): AgentExtensionSkill[] {
+		return [...this.registry.skills];
 	}
 
 	getRegisteredAutomationEventTypes(): AgentExtensionAutomationEventType[] {

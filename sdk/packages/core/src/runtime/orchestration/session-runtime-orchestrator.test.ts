@@ -239,6 +239,7 @@ describe("SessionRuntime construction", () => {
 			tools: [],
 			commands: [],
 			rules: [],
+			skills: [],
 			messageBuilder: [],
 			providers: [],
 			automationEventTypes: [],

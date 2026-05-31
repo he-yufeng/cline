@@ -118,6 +118,7 @@ function collectRegisteredTools(
 		registerCommand: () => {},
 		registerMessageBuilder: () => {},
 		registerRule: () => {},
+		registerSkill: () => {},
 		registerProvider: () => {},
 		registerAutomationEventType: () => {},
 	};

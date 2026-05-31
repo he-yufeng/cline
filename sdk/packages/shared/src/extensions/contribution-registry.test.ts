@@ -133,3 +133,89 @@ describe("ContributionRegistry automation event contributions", () => {
 		);
 	});
 });
+
+describe("ContributionRegistry skill contributions", () => {
+	it("registers skills declared by plugins", async () => {
+		const registry = createContributionRegistry({
+			extensions: [
+				{
+					name: "skill-plugin",
+					manifest: { capabilities: ["skills"] },
+					setup(api) {
+						api.registerSkill({
+							name: " review ",
+							description: " Review changes ",
+							instructions: "Review the current diff.",
+							frontmatter: { bundled: true },
+						});
+					},
+				},
+			],
+		});
+
+		await registry.initialize();
+
+		expect(registry.getRegistrySnapshot().skills).toEqual([
+			{
+				name: "review",
+				description: "Review changes",
+				instructions: "Review the current diff.",
+				frontmatter: { bundled: true },
+				source: "skill-plugin",
+			},
+		]);
+		expect(registry.getRegisteredSkills()).toHaveLength(1);
+	});
+
+	it("requires the skills capability before registration", async () => {
+		const registry = createContributionRegistry({
+			extensions: [
+				{
+					name: "missing-capability",
+					manifest: { capabilities: ["tools"] },
+					setup(api) {
+						api.registerSkill({
+							name: "review",
+							instructions: "Review the current diff.",
+						});
+					},
+				},
+			],
+		});
+
+		await expect(registry.initialize()).rejects.toThrow(
+			/registerSkill requires the "skills" capability/,
+		);
+	});
+
+	it("exposes earlier registered skills during later setup calls", async () => {
+		const observed: string[][] = [];
+		const registry = createContributionRegistry({
+			extensions: [
+				{
+					name: "skill-plugin",
+					manifest: { capabilities: ["skills"] },
+					setup(api) {
+						api.registerSkill({
+							name: "review",
+							instructions: "Review the current diff.",
+						});
+					},
+				},
+				{
+					name: "consumer-plugin",
+					manifest: { capabilities: ["commands"] },
+					setup(api) {
+						observed.push(
+							api.getRegisteredSkills?.().map((skill) => skill.name) ?? [],
+						);
+					},
+				},
+			],
+		});
+
+		await registry.initialize();
+
+		expect(observed).toEqual([["review"]]);
+	});
+});

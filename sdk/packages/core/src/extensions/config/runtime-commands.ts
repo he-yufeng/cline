@@ -1,4 +1,4 @@
-import { truncateSplit } from "@cline/shared";
+import { type AgentExtensionSkill, truncateSplit } from "@cline/shared";
 import type {
 	SkillConfig,
 	UserInstructionConfigWatcher,
@@ -36,6 +36,16 @@ function isCommandEnabled(command: SkillConfig | WorkflowConfig): boolean {
 	return command.disabled !== true;
 }
 
+function normalizeSkillToken(token: string): string {
+	return token.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function registeredSkillId(skill: AgentExtensionSkill): string {
+	const source = normalizeSkillToken(skill.source ?? "plugin") || "plugin";
+	const name = normalizeSkillToken(skill.name);
+	return `${source}:${name}`;
+}
+
 function listCommandsForKind(
 	watcher: UserInstructionConfigWatcher,
 	kind: RuntimeCommandKind,
@@ -53,13 +63,40 @@ function listCommandsForKind(
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function listCommandsForRegisteredSkills(
+	registeredSkills: ReadonlyArray<AgentExtensionSkill>,
+): AvailableRuntimeCommand[] {
+	return registeredSkills
+		.filter((skill) => skill.disabled !== true)
+		.map((skill) => {
+			const name = skill.name.trim();
+			const description = skill.description?.trim()
+				? truncateSplit(skill.description, ".")
+				: truncateSplit(skill.instructions, ".");
+			return {
+				id: registeredSkillId(skill),
+				name,
+				instructions: skill.instructions,
+				description,
+				kind: "skill" as const,
+			};
+		})
+		.filter(
+			(command) =>
+				command.name.length > 0 && command.instructions.trim().length > 0,
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function listAvailableRuntimeCommandsFromWatcher(
 	watcher: UserInstructionConfigWatcher,
+	registeredSkills: ReadonlyArray<AgentExtensionSkill> = [],
 ): AvailableRuntimeCommand[] {
 	const byName = new Map<string, AvailableRuntimeCommand>();
 	for (const command of [
 		...listCommandsForKind(watcher, "workflow"),
 		...listCommandsForKind(watcher, "skill"),
+		...listCommandsForRegisteredSkills(registeredSkills),
 	]) {
 		if (!byName.has(command.name)) {
 			byName.set(command.name, command);

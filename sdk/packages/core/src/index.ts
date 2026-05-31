@@ -13,6 +13,8 @@ export type {
 	AgentExtension as AgentPlugin, // Public-facing alias for extensions
 	AgentExtensionCommand,
 	AgentExtensionCommand as AgentPluginCommand,
+	AgentExtensionSkill,
+	AgentExtensionSkill as AgentPluginSkill,
 	AgentHooks,
 	AgentMode,
 	AgentResult,

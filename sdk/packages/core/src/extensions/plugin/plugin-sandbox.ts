@@ -6,6 +6,7 @@ import type {
 	AgentConfig,
 	AgentExtensionAutomationEventType,
 	AgentExtensionRule,
+	AgentExtensionSkill,
 	AgentRuntimeHooks,
 	AgentTool,
 	Message,
@@ -71,6 +72,10 @@ type SandboxedRuleDescriptor = Omit<AgentExtensionRule, "id" | "content"> & {
 	hasContentHandler?: boolean;
 };
 
+type SandboxedSkillDescriptor = AgentExtensionSkill & {
+	id: string;
+};
+
 type SandboxedAutomationEventTypeDescriptor =
 	AgentExtensionAutomationEventType & {
 		id: string;
@@ -86,6 +91,7 @@ type SandboxedPluginDescriptor = {
 		tools: SandboxedContributionDescriptor[];
 		commands: SandboxedContributionDescriptor[];
 		rules: SandboxedRuleDescriptor[];
+		skills: SandboxedSkillDescriptor[];
 		messageBuilders: SandboxedContributionDescriptor[];
 		providers: SandboxedContributionDescriptor[];
 		automationEventTypes: SandboxedAutomationEventTypeDescriptor[];
@@ -107,6 +113,7 @@ function normalizeDescriptor(
 			tools: descriptor.contributions?.tools ?? [],
 			commands: descriptor.contributions?.commands ?? [],
 			rules: descriptor.contributions?.rules ?? [],
+			skills: descriptor.contributions?.skills ?? [],
 			messageBuilders: descriptor.contributions?.messageBuilders ?? [],
 			providers: descriptor.contributions?.providers ?? [],
 			automationEventTypes:
@@ -305,6 +312,7 @@ export async function loadSandboxedPlugins(
 						contributionTimeoutMs,
 						reinitialize,
 					);
+					registerSkills(api, descriptor);
 					registerMessageBuilders(
 						api,
 						sandbox,
@@ -473,6 +481,22 @@ function registerRules(
 							}
 						}
 					: (rule.content ?? ""),
+		});
+	}
+}
+
+function registerSkills(
+	api: AgentExtensionApi,
+	descriptor: SandboxedPluginDescriptor,
+): void {
+	for (const skill of descriptor.contributions?.skills ?? []) {
+		api.registerSkill({
+			name: skill.name,
+			description: skill.description,
+			disabled: skill.disabled,
+			instructions: skill.instructions,
+			frontmatter: skill.frontmatter,
+			source: skill.source ?? descriptor.name,
 		});
 	}
 }

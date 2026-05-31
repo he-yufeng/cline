@@ -37,6 +37,7 @@ export type {
 	AgentExtensionRegistry,
 	AgentExtensionRule,
 	AgentExtensionSessionContext,
+	AgentExtensionSkill,
 	ContributionRegistryExtension,
 	ContributionRegistryOptions,
 	PluginManifest,

@@ -1,4 +1,8 @@
-import type { AgentExtension, AgentTool } from "@cline/shared";
+import type {
+	AgentExtension,
+	AgentExtensionSkill,
+	AgentTool,
+} from "@cline/shared";
 import { loadRulesForSystemPromptFromWatcher } from "../../runtime/safety/rules";
 import {
 	createSkillsTool,
@@ -22,6 +26,12 @@ type ConfiguredSkill = SkillsExecutorMetadataItem & {
 	skill: SkillConfig;
 };
 
+type RegisteredSkillsProvider = () => ReadonlyArray<AgentExtensionSkill>;
+
+type RegisteredSkillsApi = {
+	getRegisteredSkills?: () => ReadonlyArray<AgentExtensionSkill>;
+};
+
 export interface CreateUserInstructionPluginOptions {
 	watcher: UserInstructionConfigWatcher;
 	watcherReady?: Promise<void>;
@@ -34,6 +44,24 @@ export interface CreateUserInstructionPluginOptions {
 
 function normalizeSkillToken(token: string): string {
 	return token.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function getRegisteredSkillsFromApi(
+	api: object,
+): ReadonlyArray<AgentExtensionSkill> {
+	if (
+		"getRegisteredSkills" in api &&
+		typeof (api as RegisteredSkillsApi).getRegisteredSkills === "function"
+	) {
+		return (api as RegisteredSkillsApi).getRegisteredSkills?.() ?? [];
+	}
+	return [];
+}
+
+function registeredSkillId(skill: AgentExtensionSkill): string {
+	const source = normalizeSkillToken(skill.source ?? "plugin") || "plugin";
+	const name = normalizeSkillToken(skill.name);
+	return `${source}:${name}`;
 }
 
 function toAllowedSkillSet(
@@ -92,11 +120,58 @@ export function getConfiguredSkillsFromWatcher(
 		.filter((skill) => isSkillAllowed(skill.id, skill.name, allowedSkills));
 }
 
+function getConfiguredSkillsFromRegisteredSkills(
+	registeredSkills: ReadonlyArray<AgentExtensionSkill>,
+	allowedSkillNames?: ReadonlyArray<string>,
+): ConfiguredSkill[] {
+	const allowedSkills = toAllowedSkillSet(allowedSkillNames);
+	return registeredSkills
+		.map((skill) => {
+			const name = skill.name.trim();
+			const configuredSkill: SkillConfig = {
+				name,
+				...(skill.description?.trim()
+					? { description: skill.description.trim() }
+					: {}),
+				...(skill.disabled === true ? { disabled: true } : {}),
+				instructions: skill.instructions,
+				frontmatter: skill.frontmatter ?? {},
+			};
+			return {
+				id: registeredSkillId(skill),
+				name,
+				description: configuredSkill.description,
+				disabled: configuredSkill.disabled === true,
+				skill: configuredSkill,
+			};
+		})
+		.filter(
+			(skill) =>
+				skill.name.length > 0 && skill.skill.instructions.trim().length > 0,
+		)
+		.filter((skill) => isSkillAllowed(skill.id, skill.name, allowedSkills));
+}
+
+function getConfiguredSkills(
+	watcher: UserInstructionConfigWatcher,
+	allowedSkillNames?: ReadonlyArray<string>,
+	registeredSkills?: RegisteredSkillsProvider,
+): ConfiguredSkill[] {
+	return [
+		...getConfiguredSkillsFromWatcher(watcher, allowedSkillNames),
+		...getConfiguredSkillsFromRegisteredSkills(
+			registeredSkills?.() ?? [],
+			allowedSkillNames,
+		),
+	];
+}
+
 function listAvailableSkillNames(
 	watcher: UserInstructionConfigWatcher,
 	allowedSkillNames?: ReadonlyArray<string>,
+	registeredSkills?: RegisteredSkillsProvider,
 ): string[] {
-	return getConfiguredSkillsFromWatcher(watcher, allowedSkillNames)
+	return getConfiguredSkills(watcher, allowedSkillNames, registeredSkills)
 		.filter((skill) => !skill.disabled)
 		.map((skill) => skill.name.trim())
 		.filter((name) => name.length > 0)
@@ -107,15 +182,17 @@ function resolveSkillRecord(
 	watcher: UserInstructionConfigWatcher,
 	requestedSkill: string,
 	allowedSkillNames?: ReadonlyArray<string>,
+	registeredSkills?: RegisteredSkillsProvider,
 ): { id: string; skill: SkillConfig } | { error: string } {
 	const normalized = normalizeSkillToken(requestedSkill);
 	if (!normalized) {
 		return { error: "Missing skill name." };
 	}
 
-	const configuredSkills = getConfiguredSkillsFromWatcher(
+	const configuredSkills = getConfiguredSkills(
 		watcher,
 		allowedSkillNames,
+		registeredSkills,
 	);
 	const exact = configuredSkills.find((entry) => entry.id === normalized);
 	if (exact) {
@@ -162,7 +239,11 @@ function resolveSkillRecord(
 		};
 	}
 
-	const available = listAvailableSkillNames(watcher, allowedSkillNames);
+	const available = listAvailableSkillNames(
+		watcher,
+		allowedSkillNames,
+		registeredSkills,
+	);
 	return {
 		error:
 			available.length > 0
@@ -175,11 +256,17 @@ export function createUserInstructionSkillsExecutor(
 	watcher: UserInstructionConfigWatcher,
 	watcherReady: Promise<void> = Promise.resolve(),
 	allowedSkillNames?: ReadonlyArray<string>,
+	registeredSkills?: RegisteredSkillsProvider,
 ): SkillsExecutorWithMetadata {
 	const runningSkills = new Set<string>();
 	const executor: SkillsExecutorWithMetadata = (async (skillName, args) => {
 		await watcherReady;
-		const resolved = resolveSkillRecord(watcher, skillName, allowedSkillNames);
+		const resolved = resolveSkillRecord(
+			watcher,
+			skillName,
+			allowedSkillNames,
+			registeredSkills,
+		);
 		if ("error" in resolved) {
 			return resolved.error;
 		}
@@ -207,7 +294,7 @@ export function createUserInstructionSkillsExecutor(
 
 	Object.defineProperty(executor, "configuredSkills", {
 		get: () =>
-			getConfiguredSkillsFromWatcher(watcher, allowedSkillNames).map(
+			getConfiguredSkills(watcher, allowedSkillNames, registeredSkills).map(
 				({ skill: _skill, ...metadata }) => metadata,
 			),
 		enumerable: true,
@@ -233,6 +320,7 @@ export function createUserInstructionPlugin(
 		},
 		async setup(api) {
 			await watcherReady;
+			const registeredSkills = () => getRegisteredSkillsFromApi(api);
 
 			if (options.includeRules) {
 				api.registerRule({
@@ -249,6 +337,7 @@ export function createUserInstructionPlugin(
 							options.watcher,
 							watcherReady,
 							options.allowedSkillNames,
+							registeredSkills,
 						),
 					) as AgentTool,
 				);
@@ -256,6 +345,7 @@ export function createUserInstructionPlugin(
 
 			for (const command of listAvailableRuntimeCommandsFromWatcher(
 				options.watcher,
+				registeredSkills(),
 			).filter(
 				(command) =>
 					(command.kind === "skill" && options.includeSkills) ||

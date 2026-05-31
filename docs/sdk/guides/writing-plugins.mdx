@@ -286,6 +286,34 @@ cline plugin install https://github.com/your-org/cline-github-plugin.git
 
 See [Plugins](/customization/plugins) for the full manifest format, directory layout, and the [typescript-lsp-plugin](https://github.com/cline/typescript-lsp-plugin) for a complete working example.
 
+## Bundling Skills in a Plugin
+
+Use `api.registerSkill()` when a plugin should install reusable instructions along with its tools or hooks. The plugin must declare the `skills` capability.
+
+```typescript
+import { type AgentPlugin } from "@cline/sdk"
+
+const plugin: AgentPlugin = {
+  name: "review-guidance",
+  manifest: { capabilities: ["skills"] },
+  setup(api) {
+    api.registerSkill({
+      name: "review",
+      description: "Review a code change with project-specific checks.",
+      instructions: [
+        "Inspect the current diff.",
+        "Check for missing tests, behavior changes, and migration risk.",
+        "Return findings first, then any open questions.",
+      ].join("\n"),
+    })
+  },
+}
+
+export default plugin
+```
+
+When the plugin is installed, end users get the bundled skill through the same runtime path as local `SKILL.md` files.
+
 ## Plugin Design Guidelines
 
 1. Use factory functions (like `createGitHubPlugin`) when the plugin needs configuration. Export the plugin object directly when it doesn't.

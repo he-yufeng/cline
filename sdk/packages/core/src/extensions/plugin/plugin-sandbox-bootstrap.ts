@@ -11,6 +11,7 @@
  */
 
 import {
+	type AgentExtensionSkill,
 	type AutomationEventEnvelope,
 	normalizePluginManifest,
 	type PluginManifest,
@@ -46,6 +47,8 @@ interface PluginRule {
 	source?: string;
 }
 
+type PluginSkill = AgentExtensionSkill;
+
 interface PluginMessageBuilder {
 	name: string;
 	build: (message: unknown[]) => unknown[]; // Message[]
@@ -71,6 +74,7 @@ interface PluginApi {
 	registerTool(tool: PluginTool): void;
 	registerCommand(command: PluginCommand): void;
 	registerRule(rule: PluginRule): void;
+	registerSkill(skill: PluginSkill): void;
 	registerMessageBuilder(builder: PluginMessageBuilder): void;
 	registerProvider(provider: PluginProvider): void;
 	registerAutomationEventType(eventType: PluginAutomationEventType): void;
@@ -118,6 +122,10 @@ interface RuleContributionDescriptor {
 	hasContentHandler?: boolean;
 }
 
+type SkillContributionDescriptor = PluginSkill & {
+	id: string;
+};
+
 interface AutomationEventTypeDescriptor {
 	id: string;
 	eventType: string;
@@ -139,6 +147,7 @@ interface PluginDescriptor {
 		tools: ContributionDescriptor[];
 		commands: ContributionDescriptor[];
 		rules: RuleContributionDescriptor[];
+		skills: SkillContributionDescriptor[];
 		messageBuilders: ContributionDescriptor[];
 		providers: ContributionDescriptor[];
 		automationEventTypes: AutomationEventTypeDescriptor[];
@@ -414,6 +423,7 @@ async function loadPluginDescriptor(args: {
 		plugin = (moduleExports.default ??
 			moduleExports[args.exportName]) as unknown as PluginModule;
 		assertValidPluginModule(plugin, args.pluginPath);
+		const pluginName = plugin.name;
 		plugin.manifest = normalizePluginManifest(plugin.manifest);
 		if (!matchesPluginManifestTargeting(plugin.manifest, args.targeting)) {
 			return { type: "skipped" };
@@ -423,6 +433,7 @@ async function loadPluginDescriptor(args: {
 			tools: [],
 			commands: [],
 			rules: [],
+			skills: [],
 			messageBuilders: [],
 			providers: [],
 			automationEventTypes: [],
@@ -477,6 +488,19 @@ async function loadPluginDescriptor(args: {
 					ruleId: rule.id,
 					content: rule.content,
 					source: rule.source,
+				});
+			},
+			registerSkill: (skill) => {
+				contributions.skills.push({
+					id: makeId(args.pluginId, "skill"),
+					name: skill.name,
+					description: skill.description,
+					disabled: skill.disabled,
+					instructions: skill.instructions,
+					frontmatter: skill.frontmatter
+						? sanitizeObject(skill.frontmatter)
+						: undefined,
+					source: skill.source?.trim() ? skill.source : pluginName,
 				});
 			},
 			registerMessageBuilder: (builder) => {

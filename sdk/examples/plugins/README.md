@@ -132,6 +132,7 @@ Declare what the plugin uses in `manifest.capabilities`. Each one unlocks one pa
 | ------------------ | --------------- |
 | `tools`            | `api.registerTool()` |
 | `commands`         | `api.registerCommand()` |
+| `skills`           | `api.registerSkill()` |
 | `providers`        | `api.registerProvider()` |
 | `messageBuilders`  | `api.registerMessageBuilder()` |
 | `automationEvents` | `api.registerAutomationEventType()` and `ctx.automation?.ingestEvent()` |
